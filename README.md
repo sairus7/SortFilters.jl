@@ -3,7 +3,7 @@
 Moving quantiles implemented as fast moving window sort algorithm.
 Implemented both as functions over a moving window, and stateful filter objects.
 
-Available quantiles: moving median, minimum, maximum and so on.
+Setting an appropriate probability level, you can get: moving median, minimum, maximum, quartiles and so on.
 
 ## Installation
 ```julia
