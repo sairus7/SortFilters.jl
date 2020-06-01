@@ -10,22 +10,22 @@ export movsort!, movsort,
 
 const Evt{T} = NamedTuple{(:pos, :val),Tuple{Int,T}}
 Evt(pos::Int, val::T) where T = (pos = pos, val = val)
+tuplen(::NTuple{N, Any}) where {N} = N
 
-#Base.:(==)(a::Evt{T}, b::Evt{T}) where {T} = a.val == b.val
-#Base.isless(a::Evt{T}, b::Evt{T}) where {T} = a.val < b.val ##? defines sort(Bartype) sort type
 
-#=
-buf = Vector{Evt{Int}}(undef, 11)
-for (i,v) in zip(1:11, 10:10:110)
-    buf[i] = Evt(-i, v)
-end
+# convert to rational type of p
+movsort(in::AbstractVector{T}, window::Int, p::Union{Real, Tuple{Vararg{Real}}}) where T =
+    movsort!(similar(in, typeof(p)), in, window, p)
 
-p = sort(buf)
-=#
+# preserve type of input
+movsort(in::AbstractVector{T}, window::Int, p::Integer) where T =
+    movsort!(similar(in), in, window, p)
+
+# preserve type of input
+movsort(in::AbstractVector{T}, window::Int, p::Tuple{Vararg{Integer}}) where T =
+    movsort!(similar(Array{NTuple{tuplen(p),T}}, axes(in)), in, window, p)
 
 # sort vector in moving window
-movsort(in::AbstractVector{T}, window::Int, p) where T =
-    movsort!(similar(Array{typeof(p)}, axes(in)), in, window, p)
 function movsort!(out, in::AbstractVector{T}, window::Int, p) where T
     len = length(p)
     buf = Vector{Evt{T}}(undef, window)
@@ -109,7 +109,6 @@ function add!(state::MovSortFilter{T}, x::T) where T
         copyto!(buf, iold, buf, iold + 1, inew - iold)
     elseif iold > inew
         inew += 1
-        @show inew, iold
         copyto!(buf, inew + 1, buf, inew, iold - inew)
     end
     buf[inew] = Evt(counter, x)
@@ -128,13 +127,20 @@ end
     map(x->_quantile(state.buf, x), p)
 end
 
-# convert to rational type
+# convert to rational type of p
 function Base.run(state::MovSortFilter{T}, x::AbstractVector{T}, p::Union{Real, Tuple{Vararg{Real}}}) where T
-    run!(similar(x, typeof(p)), state, x, p)
+    y = similar(x, typeof(p))
+    run!(y, state, x, p)
 end
-# preserve type & simplified quantiles
-function Base.run(state::MovSortFilter{T}, x::AbstractVector{T}, p::Union{Integer, Tuple{Vararg{Integer}}}) where T
-    run!(similar(x), state, x, p)
+# preserve type of input & simplified quantiles as nearest index
+function Base.run(state::MovSortFilter{T}, x::AbstractVector{T}, p::Integer) where T
+    y = similar(x)
+    run!(y, state, x, p)
+end
+# preserve type of input & simplified quantiles as nearest index
+function Base.run(state::MovSortFilter{T}, x::AbstractVector{T}, p::Tuple{Vararg{Integer}}) where T
+    y = similar(Array{NTuple{tuplen(p),T}}, axes(x))
+    run!(y, state, x, p)
 end
 
 function run!(
@@ -182,9 +188,11 @@ end
         return (1-h)*a + h*b
     end
 end
-# preserves original type when p is Int in 0..100 - just return lower index
+# preserves original type when p is Int in 0..100 - just return nearest index
 @inline function _quantile(v::Vector{Evt{T}}, p::Integer) where T
-    iq = (length(v) - 1) * p ÷ 100 + 1
+    0 <= p <= 100 || throw(ArgumentError("input probability out of [0,100] percent range"))
+    # iq = (length(v) - 1) * p ÷ 100 + 1 # lower index
+    iq = 1 + round(Int, (length(v) - 1) * p / 100, RoundNearestTiesUp) # nearest index
     return v[iq].val
 end
 @inline function _quantile(v::Vector{Evt{T}}, p) where T

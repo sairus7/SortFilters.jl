@@ -3,96 +3,115 @@ using Test
 using Random
 using Statistics
 
-#@testset "Stateful sort filters" begin
 
 len = 100
 Random.seed!(1)
 T = Int
-v = rand(0:100, len)
-window = 5
+x = rand(T(-10):T(10), len)
+window = 9
 
-mx_ref = similar(v)
-mn_ref = similar(v)
-med_ref = similar(v, Float64)
-p03_ref = similar(v, Float64)
-p02_p07_ref = similar(v, NTuple{2,Float64})
+mx_ref = similar(x)
+mn_ref = similar(x)
+med_ref = similar(x, Float64)
+p20_ref = similar(x, Float64)
+p25_p75_ref = similar(x, NTuple{2,Float64})
 
 for i = 1:len
-    chunk = v[max(1, i-window+1) : i]
+    chunk = x[max(1, i-window+1) : i]
     mx_ref[i] = maximum(chunk)
     mn_ref[i] = minimum(chunk)
     med_ref[i] = median(chunk)
-    p03_ref[i] = quantile(chunk, 0.3)
-    p02_p07_ref[i] = quantile(chunk, (0.2, 0.7))
+    p20_ref[i] = quantile(chunk, 0.20)
+    p25_p75_ref[i] = quantile(chunk, (0.25, 0.75))
 end
 
-#Juno.@enter median(v[1:2])
-#Juno.@enter quantile(v[1:2], 0.5)
-#@testset "MovSortFilter" begin
+
+@testset "reset filter state and run" begin
+
 f = MovSortFilter{T}(window)
-mn = run(f, v, 0)
+mx = run(f, x, 1.0)
 reset!(f)
-mx = run(f, v, 100)
+mx_ = run(f, x, 100)
+
 reset!(f)
-med = run(f, v, 0.5)
-@test mn == mn_ref
-@test mx == mx_ref
-@test med[window:end] == med_ref[window:end] # it has differnt behaviour at start bound
-
-# reset state
+mn = run(f, x, 0.0)
 reset!(f)
-med = run(f, v[1:len÷2], 0.5)
-@test med[window:end] == med_ref[window:len÷2] # it has differnt behaviour at start bound
-# maintain state
-med = run(f, v[len÷2+1:end], 0.5)
-@test med == med_ref[len÷2+1:end]
+mn_ = run(f, x, 0)
+
+reset!(f)
+med = run(f, x, 0.5)
+reset!(f)
+med_ = run(f, x, 50)
+
+reset!(f)
+p25_p75 = run(f, x, (0.25, 0.75))
+reset!(f)
+p25_p75_ = run(f, x, (25, 75))
+
+@test mx == mx_ == mx_ref
+@test mn == mn_ == mn_ref
+@test med[window:end] == med_[window:end] == med_ref[window:end]
+@test p25_p75[window:end] == p25_p75_[window:end] == p25_p75_ref[window:end]
+
+reset!(f)
+p20 = run(f, x, 0.20)
+@test p20[window:end] == p20_ref[window:end] # should match nearest index quantiles
+
+end
 
 
-#end
+@testset "maintain filter state and run!" begin
 
-#end
+mx 		 = similar(mx_ref, Float64)
+mx_ 	 = similar(mx_ref)
+mn 		 = similar(mn_ref, Float64)
+mn_ 	 = similar(mn_ref)
+med 	 = similar(med_ref, Float64)
+med_ 	 = similar(med_ref)
+p25_p75  = similar(p25_p75_ref, NTuple{2,Float64})
+p25_p75_ = similar(p25_p75_ref)
+p20      = similar(p20_ref, Float64)
 
+part1 = x->view(x, 1 : len÷2)
+part2 = x->view(x, len÷2+1 : len)
+part1(x)
 
+f = MovSortFilter{T}(window)
+run!(part1(mx), f, part1(x), 1.0)
+run!(part2(mx), f, part2(x), 1.0)
+reset!(f)
+run!(part1(mx_), f, part1(x), 100)
+run!(part2(mx_), f, part2(x), 100)
 
-using SystemBenchmark
+reset!(f)
+run!(part1(mn), f, part1(x), 0.0)
+run!(part2(mn), f, part2(x), 0.0)
+reset!(f)
+run!(part1(mn_), f, part1(x), 0)
+run!(part2(mn_), f, part2(x), 0)
 
-using JuliaDB
+reset!(f)
+run!(part1(med), f, part1(x), 0.5)
+run!(part2(med), f, part2(x), 0.5)
+reset!(f)
+run!(part1(med_), f, part1(x), 50)
+run!(part2(med_), f, part2(x), 50)
 
-data_table = loadtable("C:\\Users\\gvg\\Downloads\\data.csv", delim = ',', header_exists = true)
+reset!(f)
+run!(part1(p25_p75), f, part1(x), (0.25, 0.75))
+run!(part2(p25_p75), f, part2(x), (0.25, 0.75))
+reset!(f)
+run!(part1(p25_p75_), f, part1(x), (25, 75))
+run!(part2(p25_p75_), f, part2(x), (25, 75))
 
-data_table
+@test mx == mx_ == mx_ref
+@test mn == mn_ == mn_ref
+@test med[window:end] == med_[window:end] == med_ref[window:end]
+@test p25_p75[window:end] == p25_p75_[window:end] == p25_p75_ref[window:end]
 
-using Plots
+reset!(f)
+run!(part1(p20), f, part1(x), 0.20)
+run!(part2(p20), f, part2(x), 0.20)
+@test p20[window:end] == p20_ref[window:end] # should match nearest index quantiles
 
-select(data_table, )
-t = filter(row -> row.lang == "julia", data_table)
-plot(t[Symbol(size(B)])
-
-t = filter(row -> row.lang == "julia", data_table)
-
-t[1]
-
-t = filter(row -> getfield(t, Symbol("size(B)")) == "julia", data_table)
-
-getfield
-
-
-data = rand(1:100, 100)
-
-using VegaLite
-
-@vlplot(
-[
-
-]
-    :line,
-    x=:value,
-    y=:value,
-    row=:coordinate,
-    column=:coordinate,
-)
-
-x = 1:100
-
-y = rand(100)
-[@vlplot(:line, x, y,); @vlplot(:point, x, y,)] |> display
+end
