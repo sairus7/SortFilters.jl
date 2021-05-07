@@ -7,7 +7,7 @@ Setting an appropriate probability level, you can get: moving median, minimum, m
 
 ## Installation
 ```julia
-]add https://github.com/sairus7/SortFilters.jl.git
+pkg> add SortFilters
 ```
 
 ## Comparison with other packages
