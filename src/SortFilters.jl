@@ -207,19 +207,9 @@ function MovSortFilter(x::AbstractVector)
     msf
 end
 
-struct Heap{D, T}
-    data::Memory{T}
-end
-const MinHeap{T} = Heap{true, T}
-const MaxHeap{T} = Heap{false, T}
-
-function bit_index(depth, col)
-    return (1 << (depth - 1)) + col
-end
-
 struct QuantileTracker{T, I}
     index::I # The index that this tracker is tracking, e.g. the 73rd element (discrete index, not a quantile)
-    window_head::Ref{I} # Head of the circular queue `window`
+    window_head::Base.RefValue{I} # Head of the circular queue `window`
     heaps::Memory{Tuple{T, I}} # Two heaps, a min heap below and a max heap above the quantile. Binary index trees.
     window::Memory{I} # Pointer to the current position in the heap of each value, stored in insertion order, circular fifo queue
     function QuantileTracker{T, I}(data::AbstractVector{T}; quantile=nothing, index=round(I, (length(data)-1)*quantile+1)) where {T, I}
@@ -251,7 +241,7 @@ struct QuantileTracker{T, I}
             window[heaps[i][2]] = i
         end
 
-        new{T, I}(2index+1, window_head, heaps, window)
+        new{T, I}(2index+1, Ref(window_head), heaps, window)
     end
 end
 QuantileTracker(data::AbstractVector{T}; kw...) where T = QuantileTracker{T, Int}(data; kw...)
