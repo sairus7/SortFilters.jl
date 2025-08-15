@@ -209,12 +209,17 @@ end
 
 struct QuantileTracker{T, I}
     index::I # The index that this tracker is tracking, e.g. the 73rd element (discrete index, not a quantile)
+    high_frac::T
     window_head::Base.RefValue{I} # Head of the circular queue `window`
     heaps::Memory{Tuple{T, I}} # Two heaps, a min heap below and a max heap above the quantile. Binary index trees.
     window::Memory{I} # Pointer to the current position in the heap of each value, stored in insertion order, circular fifo queue
-    function QuantileTracker{T, I}(data::AbstractVector{T}; quantile=nothing, index=round(I, (length(data)-1)*quantile+1)) where {T, I}
+    function QuantileTracker{T, I}(data::AbstractVector{T}, quantile::Real) where {T, I}
+
+        index = floor(I, (length(data)-1)*quantile+1)
+        high_frac = quantile*(length(data)-1) - (index - 1)
+
         Base.require_one_based_indexing(data)
-        heaps = Memory{Tuple{T, I}}(undef, 2length(data)+3) # Extra room to pad with typemax to avoid boundschecking
+        heaps = Memory{Tuple{T, I}}(undef, 2length(data)+2) # Extra room to pad with typemax to avoid boundschecking
 
         checkbounds(data, index)
 
@@ -241,17 +246,17 @@ struct QuantileTracker{T, I}
             window[heaps[i][2]] = i
         end
 
-        new{T, I}(2index+1, Ref(window_head), heaps, window)
+        new{T, I}(2index+1, high_frac, Ref(window_head), heaps, window)
     end
 end
-QuantileTracker(data::AbstractVector{T}; kw...) where T = QuantileTracker{T, Int}(data; kw...)
+QuantileTracker(data::AbstractVector{T}, quantile::Real) where T = QuantileTracker{T, Int}(data, quantile)
 
 # binary index tree indexing arithmetic
 bit_parent(i) = i >> 1
 bit_left_child(i) = i << 1
 bit_right_child(i) = (i << 1) + one(i)
 
-Base.get(qt::QuantileTracker) = qt.heaps[qt.index][1]
+Base.get(qt::QuantileTracker) = iszero(qt.high_frac) ? qt.heaps[qt.index][1] : qt.heaps[qt.index][1]*(1 - qt.high_frac) + qt.heaps[qt.index + 1][1]*qt.high_frac
 
 function _setindex!(qt, x, j)
     qt.heaps[j] = x
@@ -259,11 +264,11 @@ function _setindex!(qt, x, j)
     nothing
 end
 # cmp(child, parent) is in order
-function bubble_parent(get_parent, cmp, qt, value, j, jp, x) # <
+function bubble_parent(get_parent, cmp, qt, stop, value, j, jp, x)
     while true
         _setindex!(qt, x, j)
         j = jp
-        j == qt.index && return j
+        j == stop && return j
         jp = get_parent(j)
         x = qt.heaps[jp]
         cmp(value, x[1]) && return j
@@ -298,30 +303,25 @@ function add!(qt::QuantileTracker{T}, value::T) where T
     # Bubble the heap as needed
     i = qt.index
     if j > i # we're in the hi heap
-        jp = bit_parent(j-i+1)+i-1
+        jp = bit_parent(j-i)+i
         x = qt.heaps[jp]
         if !(value >= x[1]) # Value is less than parent (out of order)
-            j = bubble_parent(j -> bit_parent(j-i+1)+i-1, >=, qt, value, j, jp, x)
-            if j == qt.index # we percolated all the way to the middle
+            j = bubble_parent(j -> bit_parent(j-i)+i, >=, qt, i, value, j, jp, x)
+            if j == i # we percolated all the way to the middle
                 j = bubble_child(j -> i-bit_left_child(i-j+1), <=, qt, value, j)
             end
         else
-            j = bubble_child(j -> bit_left_child(j-i+1)+i-1, >=, qt, value, j)
+            j = bubble_child(j -> bit_left_child(j-i)+i, >=, qt, value, j)
         end
-    elseif j < i # we're in the lo heap
+    else j < i # we're in the lo heap
         jp = i-bit_parent(i-j+1)+1
         x = qt.heaps[jp]
-        if !(value <= x[1]) # Value is less than parent (out of order)
-            j = bubble_parent(j -> i-bit_parent(i-j+1)+1, <=, qt, value, j, jp, x)
-            if j == qt.index # we percolated all the way to the middle
-                j = bubble_child(j -> bit_left_child(j-i+1)+i-1, >=, qt, value, j)
+        if !(value <= x[1]) # Value is more than parent (out of order)
+            j = bubble_parent(j -> i-bit_parent(i-j+1)+1, <=, qt, i+1, value, j, jp, x)
+            if j == i+1 # we percolated all the way to the middle
+                j = bubble_child(j -> bit_left_child(j-i)+i, >=, qt, value, j)
             end
         else
-            j = bubble_child(j -> i-bit_left_child(i-j+1), <=, qt, value, j)
-        end
-    else # we're at the middle
-        j = bubble_child(j -> bit_left_child(j-i+1)+i-1, >=, qt, value, j) # try to bubble high
-        if j == i # We didn't bubble high. Try to bubble low
             j = bubble_child(j -> i-bit_left_child(i-j+1), <=, qt, value, j)
         end
     end
