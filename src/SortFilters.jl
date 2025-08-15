@@ -233,10 +233,10 @@ struct QuantileTracker{T, I}
 
         # Pad with typemax and typemin to avoid boundschecking (bubbling will never propagate through these values)
         for i in 1:index+1
-            heaps[i] = (typemin(T), zero(I))
+            heaps[i] = typemin(T), zero(I)
         end
         for i in index+length(data)+2:lastindex(heaps)
-            heaps[i] = (typemax(T), zero(I))
+            heaps[i] = (T <: AbstractFloat ? T(NaN) : typemax(T)), zero(I)
         end
 
         # Populate window
@@ -263,7 +263,7 @@ function _setindex!(qt, x, j)
     qt.window[x[2]] = j
     nothing
 end
-# cmp(child, parent) is in order
+# cmp(child, parent) is out of order
 function bubble_parent(get_parent, cmp, qt, stop, value, j, jp, x)
     while true
         _setindex!(qt, x, j)
@@ -271,23 +271,24 @@ function bubble_parent(get_parent, cmp, qt, stop, value, j, jp, x)
         j == stop && return j
         jp = get_parent(j)
         x = qt.heaps[jp]
-        cmp(value, x[1]) && return j
+        cmp(value, x[1]) || return j
     end
 end
-# cmp(child, parent) is in order
+# cmp(child, parent) is out of order
 function bubble_child(get_left_child, cmp, qt, value, j)
     while true
         j_lc = get_left_child(j)
         x_l = qt.heaps[j_lc] # This being inbounds depends on the buffer space filled with typemax/typemin.
         j_rc = j_lc + one(j_lc)
         x_r = qt.heaps[j_rc]
-        jc, x = cmp(x_l[1], x_r[1]) ? (j_rc, x_r) : (j_lc, x_l) # Only compare to the more parent like child
-        cmp(x[1], value) && return j # the only end condition is the bubble reaching its appropraite location
+        jc, x = cmp(x_l[1], x_r[1]) ? (j_lc, x_l) : (j_rc, x_r) # Only compare to the more parent like child
+        cmp(x[1], value) || return j # the only end condition is the bubble reaching its appropraite location
         _setindex!(qt, x, j)
         j = jc
     end
 end
 
+reverse_isless(a, b) = isless(b, a)
 function add!(qt::QuantileTracker{T}, value::T) where T
     # Legend:
     # i is qt.index
@@ -305,24 +306,24 @@ function add!(qt::QuantileTracker{T}, value::T) where T
     if j > i # we're in the hi heap
         jp = bit_parent(j-i)+i
         x = qt.heaps[jp]
-        if !(value >= x[1]) # Value is less than parent (out of order)
-            j = bubble_parent(j -> bit_parent(j-i)+i, >=, qt, i, value, j, jp, x)
+        if isless(value, x[1]) # Value is less than parent (out of order)
+            j = bubble_parent(j -> bit_parent(j-i)+i, isless, qt, i, value, j, jp, x)
             if j == i # we percolated all the way to the middle
-                j = bubble_child(j -> i-bit_left_child(i-j+1), <=, qt, value, j)
+                j = bubble_child(j -> i-bit_left_child(i-j+1), reverse_isless, qt, value, j)
             end
         else
-            j = bubble_child(j -> bit_left_child(j-i)+i, >=, qt, value, j)
+            j = bubble_child(j -> bit_left_child(j-i)+i, isless, qt, value, j)
         end
     else j < i # we're in the lo heap
         jp = i-bit_parent(i-j+1)+1
         x = qt.heaps[jp]
-        if !(value <= x[1]) # Value is more than parent (out of order)
-            j = bubble_parent(j -> i-bit_parent(i-j+1)+1, <=, qt, i+1, value, j, jp, x)
+        if isless(x[1], value) # Value is more than parent (out of order)
+            j = bubble_parent(j -> i-bit_parent(i-j+1)+1, reverse_isless, qt, i+1, value, j, jp, x)
             if j == i+1 # we percolated all the way to the middle
-                j = bubble_child(j -> bit_left_child(j-i)+i, >=, qt, value, j)
+                j = bubble_child(j -> bit_left_child(j-i)+i, isless, qt, value, j)
             end
         else
-            j = bubble_child(j -> i-bit_left_child(i-j+1), <=, qt, value, j)
+            j = bubble_child(j -> i-bit_left_child(i-j+1), reverse_isless, qt, value, j)
         end
     end
 
