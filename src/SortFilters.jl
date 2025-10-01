@@ -207,13 +207,14 @@ function MovSortFilter(x::AbstractVector)
     msf
 end
 
-struct QuantileTracker{T, I}
+struct QuantileTracker{T, Q, I}
     index::I # The index that this tracker is tracking, e.g. the 73rd element (discrete index, not a quantile)
-    high_frac::T
+    high_frac::Q
     window_head::Base.RefValue{I} # Head of the circular queue `window`
     heaps::Memory{Tuple{T, I}} # Two heaps, a min heap below and a max heap above the quantile. Binary index trees.
     window::Memory{I} # Pointer to the current position in the heap of each value, stored in insertion order, circular fifo queue
-    function QuantileTracker{T, I}(data::AbstractVector{T}, quantile::Real) where {T, I}
+    function QuantileTracker{I}(data::AbstractVector, quantile::Real) where I
+        T = eltype(data)
 
         index = floor(I, (length(data)-1)*quantile+1)
         high_frac = quantile*(length(data)-1) - (index - 1)
@@ -241,15 +242,14 @@ struct QuantileTracker{T, I}
 
         # Populate window
         window = Memory{I}(undef, length(data))
-        window_head = 1
         for i in index+2:index+length(data)+1
             window[heaps[i][2]] = i
         end
 
-        new{T, I}(2index+1, high_frac, Ref(window_head), heaps, window)
+        new{T, typeof(high_frac), I}(2index+1, high_frac, Ref(one(I)), heaps, window)
     end
 end
-QuantileTracker(data::AbstractVector{T}, quantile::Real) where T = QuantileTracker{T, Int}(data, quantile)
+QuantileTracker(data::AbstractVector{T}, quantile::Real) where T = QuantileTracker{Int}(data, quantile)
 
 # binary index tree indexing arithmetic
 bit_parent(i) = i >> 1
