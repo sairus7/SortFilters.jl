@@ -1,7 +1,7 @@
 module SortFilters
 
 export movsort!, movsort,
-    MovSortFilter,
+    MovSortFilter, QuantileTracker,
     reset!,
     add!, run, run!,
     get, get_max, get_min, get_median
@@ -197,6 +197,138 @@ end
 end
 @inline function _quantile(v::Vector{Evt{T}}, p) where T
     map(pi->_quantile(v, pi), p)
+end
+
+function MovSortFilter(x::AbstractVector)
+    msf = MovSortFilter{eltype(x)}(length(x))
+    for value in x
+        add!(msf, value)
+    end
+    msf
+end
+
+struct QuantileTracker{T, Q, I}
+    index::I # The index that this tracker is tracking, e.g. the 73rd element (discrete index, not a quantile)
+    high_frac::Q
+    window_head::Base.RefValue{I} # Head of the circular queue `window`
+    heaps::Memory{Tuple{T, I}} # Two heaps, a min heap below and a max heap above the quantile. Binary index trees.
+    window::Memory{I} # Pointer to the current position in the heap of each value, stored in insertion order, circular fifo queue
+    function QuantileTracker{I}(data::AbstractVector, quantile::Real) where I
+        T = eltype(data)
+
+        index = floor(I, (length(data)-1)*quantile+1)
+        high_frac = quantile*(length(data)-1) - (index - 1)
+
+        Base.require_one_based_indexing(data)
+        heaps = Memory{Tuple{T, I}}(undef, 2length(data)+2) # Extra room to pad with typemax to avoid boundschecking
+
+        checkbounds(data, index)
+
+        # Copy data into the heap
+        for i in eachindex(data)
+            heaps[i+index+1] = (data[i], i) # TODO pack into a single UInt
+        end
+
+        # Heapify data
+        sort!(view(heaps,index+2:index+length(data)+1), by=first)
+
+        # Pad with typemax and typemin to avoid boundschecking (bubbling will never propagate through these values)
+        for i in 1:index+1
+            heaps[i] = typemin(T), zero(I)
+        end
+        for i in index+length(data)+2:lastindex(heaps)
+            heaps[i] = (T <: AbstractFloat ? T(NaN) : typemax(T)), zero(I)
+        end
+
+        # Populate window
+        window = Memory{I}(undef, length(data))
+        for i in index+2:index+length(data)+1
+            window[heaps[i][2]] = i
+        end
+
+        new{T, typeof(high_frac), I}(2index+1, high_frac, Ref(one(I)), heaps, window)
+    end
+end
+QuantileTracker(data::AbstractVector{T}, quantile::Real) where T = QuantileTracker{Int}(data, quantile)
+
+# binary index tree indexing arithmetic
+bit_parent(i) = i >> 1
+bit_left_child(i) = i << 1
+bit_right_child(i) = (i << 1) + one(i)
+
+Base.get(qt::QuantileTracker) = iszero(qt.high_frac) ? qt.heaps[qt.index][1] : qt.heaps[qt.index][1]*(1 - qt.high_frac) + qt.heaps[qt.index + 1][1]*qt.high_frac
+
+function _setindex!(qt, x, j)
+    qt.heaps[j] = x
+    qt.window[x[2]] = j
+    nothing
+end
+# cmp(child, parent) is out of order
+function bubble_parent(get_parent, cmp, qt, stop, value, j, jp, x)
+    while true
+        _setindex!(qt, x, j)
+        j = jp
+        j == stop && return j
+        jp = get_parent(j)
+        x = qt.heaps[jp]
+        cmp(value, x[1]) || return j
+    end
+end
+# cmp(child, parent) is out of order
+function bubble_child(get_left_child, cmp, qt, value, j)
+    while true
+        j_lc = get_left_child(j)
+        x_l = qt.heaps[j_lc] # This being inbounds depends on the buffer space filled with typemax/typemin.
+        j_rc = j_lc + one(j_lc)
+        x_r = qt.heaps[j_rc]
+        jc, x = cmp(x_l[1], x_r[1]) ? (j_lc, x_l) : (j_rc, x_r) # Only compare to the more parent like child
+        cmp(x[1], value) || return j # the only end condition is the bubble reaching its appropraite location
+        _setindex!(qt, x, j)
+        j = jc
+    end
+end
+
+reverse_isless(a, b) = isless(b, a)
+function add!(qt::QuantileTracker{T}, value::T) where T
+    # Legend:
+    # i is qt.index
+    # j is the index we are currently looking at
+    # x is an element of interest in the heap (value, index)
+
+    window_head = qt.window_head[]
+    qt.window_head[] = mod(window_head + 1, eachindex(qt.window)) # Increment the head of the circular queue
+    j = qt.window[window_head]
+    # Replace oldest value in heaps with the new value, without relocating it
+    # qt.heaps[j] = (value, j) (but don't actually do it, for performance)
+
+    # Bubble the heap as needed
+    i = qt.index
+    if j > i # we're in the hi heap
+        jp = bit_parent(j-i)+i
+        x = qt.heaps[jp]
+        if isless(value, x[1]) # Value is less than parent (out of order)
+            j = bubble_parent(j -> bit_parent(j-i)+i, isless, qt, i, value, j, jp, x)
+            if j == i # we percolated all the way to the middle
+                j = bubble_child(j -> i-bit_left_child(i-j+1), reverse_isless, qt, value, j)
+            end
+        else
+            j = bubble_child(j -> bit_left_child(j-i)+i, isless, qt, value, j)
+        end
+    else j < i # we're in the lo heap
+        jp = i-bit_parent(i-j+1)+1
+        x = qt.heaps[jp]
+        if isless(x[1], value) # Value is more than parent (out of order)
+            j = bubble_parent(j -> i-bit_parent(i-j+1)+1, reverse_isless, qt, i+1, value, j, jp, x)
+            if j == i+1 # we percolated all the way to the middle
+                j = bubble_child(j -> bit_left_child(j-i)+i, isless, qt, value, j)
+            end
+        else
+            j = bubble_child(j -> i-bit_left_child(i-j+1), reverse_isless, qt, value, j)
+        end
+    end
+
+    # Put the new value where the bubble ended up
+    _setindex!(qt, (value, window_head), j)
 end
 
 end # module
