@@ -23,6 +23,8 @@ Also [SortFilters.jl](https://github.com/sairus7/SortFilters.jl) provides statef
 
 However, if all you need is moving maximum, minimum, or range, then you should use another package, [MaxMinFilters.jl](https://github.com/sairus7/MaxMinFilters.jl), which implement much faster algorithms than moving sort.
 
+If you need a single moving quantile, use optimized `QuantileTracker` implementation from this package.
+
 ## Examples
 [examples/example.jl](https://github.com/sairus7/SortFilters.jl/blob/master/examples/example.jl):
 ```julia
