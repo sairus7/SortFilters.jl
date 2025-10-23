@@ -1,3 +1,7 @@
+using SortFilters
+using Test
+using Random
+
 x = rand(4)
 xi = maximum(x)
 qt = QuantileTracker(x, 1)

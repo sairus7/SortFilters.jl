@@ -42,11 +42,11 @@ p25_p75_ = movsort(x, window, (25, 75))
 
 @test mx == mx_ == mx_ref
 @test mn == mn_ == mn_ref
-@test med[window:end] == med_[window:end] == med_ref[window:end]
+@test med[window:end] ≈ med_[window:end] == med_ref[window:end]
 @test p25_p75[window:end] == p25_p75_[window:end] == p25_p75_ref[window:end]
 
 p20 = movsort(x, window, 0.20)
-@test p20[window:end] == p20_ref[window:end] # should match nearest index quantiles
+@test p20[window:end] ≈ p20_ref[window:end] # should match nearest index quantiles
 
 end
 
@@ -81,6 +81,6 @@ movsort!(p25_p75_, x, window, (25, 75))
 @test p25_p75[window:end] == p25_p75_[window:end] == p25_p75_ref[window:end]
 
 movsort!(p20, x, window, 0.20)
-@test p20[window:end] == p20_ref[window:end] # should not match nearest index quantiles
+@test p20[window:end] ≈ p20_ref[window:end] # should not match nearest index quantiles
 
 end

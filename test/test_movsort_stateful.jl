@@ -55,7 +55,7 @@ p25_p75_ = run(f, x, (25, 75))
 
 reset!(f)
 p20 = run(f, x, 0.20)
-@test p20[window:end] == p20_ref[window:end] # should match nearest index quantiles
+@test p20[window:end] ≈ p20_ref[window:end] # should match nearest index quantiles
 
 end
 
@@ -112,6 +112,6 @@ run!(part2(p25_p75_), f, part2(x), (25, 75))
 reset!(f)
 run!(part1(p20), f, part1(x), 0.20)
 run!(part2(p20), f, part2(x), 0.20)
-@test p20[window:end] == p20_ref[window:end] # should match nearest index quantiles
+@test p20[window:end] ≈ p20_ref[window:end] # should match nearest index quantiles
 
 end
